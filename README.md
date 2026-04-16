@@ -39,12 +39,19 @@ pip install -r requirements.txt
 python3 main.py --input dependencies.csv --output enriched.csv
 ```
 
+With a corporate proxy:
+
+```bash
+python3 main.py --input dependencies.csv --output enriched.csv --proxy http://proxy.corp:8080
+```
+
 ### CLI Options
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--input` | *(required)* | Path to input CSV |
 | `--output` | *(required)* | Path to output CSV |
+| `--proxy` | *(none)* | HTTP/HTTPS proxy URL (e.g., `http://proxy.corp:8080`) |
 | `--concurrency` | `10` | Max concurrent API requests |
 | `--log-level` | `INFO` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
 

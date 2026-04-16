@@ -42,6 +42,9 @@ ENRICHED_COLUMNS = [
 
 logger = logging.getLogger("purls-fetcher")
 
+# Set at runtime via CLI --proxy; read by all handlers.
+_proxy: str | None = None
+
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
@@ -184,11 +187,12 @@ async def _request_with_retry(
     url: str,
     headers: dict | None = None,
     parse_json: bool = True,
+    proxy: str | None = None,
 ) -> dict | str:
     last_exc: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
         try:
-            async with session.get(url, headers=headers) as resp:
+            async with session.get(url, headers=headers, proxy=proxy) as resp:
                 if resp.status == 200:
                     return (await resp.json()) if parse_json else (await resp.text())
                 if resp.status in RETRYABLE_STATUSES:
@@ -222,15 +226,21 @@ async def _request_with_retry(
 
 
 async def fetch_json(
-    session: aiohttp.ClientSession, url: str, headers: dict | None = None
+    session: aiohttp.ClientSession,
+    url: str,
+    headers: dict | None = None,
+    proxy: str | None = None,
 ) -> dict:
-    return await _request_with_retry(session, url, headers, parse_json=True)  # type: ignore[return-value]
+    return await _request_with_retry(session, url, headers, parse_json=True, proxy=proxy)  # type: ignore[return-value]
 
 
 async def fetch_text(
-    session: aiohttp.ClientSession, url: str, headers: dict | None = None
+    session: aiohttp.ClientSession,
+    url: str,
+    headers: dict | None = None,
+    proxy: str | None = None,
 ) -> str:
-    return await _request_with_retry(session, url, headers, parse_json=False)  # type: ignore[return-value]
+    return await _request_with_retry(session, url, headers, parse_json=False, proxy=proxy)  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +330,7 @@ async def fetch_maven(
             f"&core=gav&rows={rows}&start={start}&wt=json"
         )
         try:
-            data = await fetch_json(session, url)
+            data = await fetch_json(session, url, proxy=_proxy)
         except aiohttp.ClientResponseError as exc:
             if exc.status == 404:
                 return PackageMetadata()
@@ -354,7 +364,7 @@ async def fetch_pypi(
 ) -> PackageMetadata:
     url = f"https://pypi.org/pypi/{quote(purl.name, safe='')}/json"
     try:
-        data = await fetch_json(session, url)
+        data = await fetch_json(session, url, proxy=_proxy)
     except aiohttp.ClientResponseError as exc:
         if exc.status == 404:
             return PackageMetadata()
@@ -388,7 +398,7 @@ async def fetch_npm(
         pkg_name = purl.name
     url = f"https://registry.npmjs.org/{pkg_name}"
     try:
-        data = await fetch_json(session, url)
+        data = await fetch_json(session, url, proxy=_proxy)
     except aiohttp.ClientResponseError as exc:
         if exc.status == 404:
             return PackageMetadata()
@@ -430,7 +440,7 @@ async def fetch_golang(
 
     list_url = f"https://proxy.golang.org/{encoded}/@v/list"
     try:
-        text = await fetch_text(session, list_url)
+        text = await fetch_text(session, list_url, proxy=_proxy)
     except aiohttp.ClientResponseError as exc:
         if exc.status in (404, 410):
             return PackageMetadata()
@@ -447,7 +457,7 @@ async def fetch_golang(
     async def get_version_info(ver: str) -> tuple[str, datetime] | None:
         info_url = f"https://proxy.golang.org/{encoded}/@v/{ver}.info"
         try:
-            info = await fetch_json(session, info_url)
+            info = await fetch_json(session, info_url, proxy=_proxy)
             return (info["Version"], _parse_iso(info["Time"]))
         except Exception as exc:
             logger.debug("Go version info failed for %s@%s: %s", module_path, ver, exc)
@@ -474,7 +484,7 @@ async def fetch_nuget(
     lowered = purl.name.lower()
     url = f"https://api.nuget.org/v3/registration5-gz-semver2/{lowered}/index.json"
     try:
-        data = await fetch_json(session, url)
+        data = await fetch_json(session, url, proxy=_proxy)
     except aiohttp.ClientResponseError as exc:
         if exc.status == 404:
             return PackageMetadata()
@@ -493,7 +503,7 @@ async def fetch_nuget(
             if not page_url:
                 continue
             try:
-                page_data = await fetch_json(session, page_url)
+                page_data = await fetch_json(session, page_url, proxy=_proxy)
                 items = page_data.get("items", [])
             except Exception as exc:
                 logger.debug("NuGet page fetch failed: %s", exc)
@@ -525,7 +535,7 @@ async def fetch_cargo(
     url = f"https://crates.io/api/v1/crates/{quote(purl.name, safe='')}"
     headers = {"User-Agent": "purls-fetcher/1.0"}
     try:
-        data = await fetch_json(session, url, headers=headers)
+        data = await fetch_json(session, url, headers=headers, proxy=_proxy)
     except aiohttp.ClientResponseError as exc:
         if exc.status == 404:
             return PackageMetadata()
@@ -558,7 +568,7 @@ async def fetch_rubygems(
 ) -> PackageMetadata:
     url = f"https://rubygems.org/api/v1/versions/{quote(purl.name, safe='')}.json"
     try:
-        data = await fetch_json(session, url)
+        data = await fetch_json(session, url, proxy=_proxy)
     except aiohttp.ClientResponseError as exc:
         if exc.status == 404:
             return PackageMetadata()
@@ -755,12 +765,20 @@ def main() -> None:
         help="Max concurrent API requests (default: 10)",
     )
     parser.add_argument(
+        "--proxy",
+        default=None,
+        help="HTTP/HTTPS proxy URL (e.g., http://proxy.corp:8080)",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level (default: INFO)",
     )
     args = parser.parse_args()
+
+    global _proxy
+    _proxy = args.proxy
 
     logging.basicConfig(
         level=getattr(logging, args.log_level),
