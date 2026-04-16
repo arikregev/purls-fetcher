@@ -191,22 +191,27 @@ async def _request_with_retry(
     proxy: str | None = None,
 ) -> dict | str:
     last_exc: Exception | None = None
+    last_status: int | None = None
     for attempt in range(MAX_RETRIES + 1):
         try:
             async with session.get(url, headers=headers, proxy=proxy) as resp:
                 if resp.status == 200:
                     return (await resp.json()) if parse_json else (await resp.text())
                 if resp.status in RETRYABLE_STATUSES:
-                    retry_after = resp.headers.get("Retry-After")
-                    if retry_after and attempt < MAX_RETRIES:
-                        delay = float(retry_after)
-                    else:
-                        delay = BASE_BACKOFF * (2**attempt) + random.random()
-                    logger.debug(
-                        "HTTP %d from %s — retrying in %.1fs", resp.status, url, delay
-                    )
-                    await asyncio.sleep(delay)
-                    continue
+                    last_status = resp.status
+                    if attempt < MAX_RETRIES:
+                        retry_after = resp.headers.get("Retry-After")
+                        if retry_after:
+                            delay = float(retry_after)
+                        else:
+                            delay = BASE_BACKOFF * (2**attempt) + random.random()
+                        logger.debug(
+                            "HTTP %d from %s — retrying in %.1fs",
+                            resp.status, url, delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    # Last attempt — fall through to raise_for_status
                 resp.raise_for_status()
         except aiohttp.ClientResponseError:
             raise
@@ -223,7 +228,17 @@ async def _request_with_retry(
                 await asyncio.sleep(delay)
             else:
                 raise
-    raise last_exc  # type: ignore[misc]
+    # Should not be reached, but guard against it
+    if last_exc is not None:
+        raise last_exc
+    raise aiohttp.ClientResponseError(
+        request_info=aiohttp.RequestInfo(
+            url=url, method="GET", headers={}, real_url=url,  # type: ignore[arg-type]
+        ),
+        history=(),
+        status=last_status or 0,
+        message=f"Retries exhausted for {url}",
+    )
 
 
 async def fetch_json(
