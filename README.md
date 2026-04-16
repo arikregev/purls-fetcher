@@ -53,6 +53,7 @@ python3 main.py --input dependencies.csv --output enriched.csv --proxy http://pr
 | `--output` | *(required)* | Path to output CSV |
 | `--proxy` | *(none)* | HTTP/HTTPS proxy URL (e.g., `http://proxy.corp:8080`) |
 | `--concurrency` | `10` | Max concurrent API requests |
+| `--log-file` | *(none)* | Path to log file (console output is always kept) |
 | `--log-level` | `INFO` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
 
 ## Input Format

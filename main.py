@@ -786,6 +786,11 @@ def main() -> None:
         help="HTTP/HTTPS proxy URL (e.g., http://proxy.corp:8080)",
     )
     parser.add_argument(
+        "--log-file",
+        default=None,
+        help="Path to log file (logs are always printed to console; this adds a file copy)",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -796,10 +801,12 @@ def main() -> None:
     global _proxy
     _proxy = args.proxy
 
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    log_level = getattr(logging, args.log_level)
+    log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if args.log_file:
+        handlers.append(logging.FileHandler(args.log_file, mode="w", encoding="utf-8"))
+    logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
 
     if _proxy is None:
         env_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
