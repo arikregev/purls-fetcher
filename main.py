@@ -26,8 +26,9 @@ ERROR = "ERROR"
 MAX_RETRIES = 3
 BASE_BACKOFF = 1.0
 
-INPUT_COLUMNS = ["CSI_ID", "COMPONENT", "BUILD_ID", "PURL", "DEPLOYED_VERSION"]
+INPUT_COLUMNS = ["CSI_ID", "PROJECT_NAME", "BUILD_ID", "PURL"]
 ENRICHED_COLUMNS = [
+    "DEPLOYED_VERSION",
     "PUBLISHED_AT",
     "LATEST_VERSION",
     "LATEST_VERSION_PUBLISHED_AT",
@@ -620,8 +621,8 @@ def _format_date(dt: datetime | None) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
 
-def enrich_row(row: dict, metadata: PackageMetadata, purl_str: str) -> dict:
-    deployed_version = row["DEPLOYED_VERSION"]
+def enrich_row(row: dict, metadata: PackageMetadata, purl_str: str, purl: PackageURL) -> dict:
+    deployed_version = purl.version or ""
 
     deployed_date = metadata.versions.get(deployed_version)
     latest_ver, latest_date = determine_latest_stable(
@@ -632,6 +633,7 @@ def enrich_row(row: dict, metadata: PackageMetadata, purl_str: str) -> dict:
     earliest_date = earliest[1] if earliest else None
 
     enriched = dict(row)
+    enriched["DEPLOYED_VERSION"] = deployed_version
     enriched["PUBLISHED_AT"] = _format_date(deployed_date)
     enriched["LATEST_VERSION"] = latest_ver
     enriched["LATEST_VERSION_PUBLISHED_AT"] = _format_date(latest_date)
@@ -721,11 +723,13 @@ async def process_rows(
 
         if metadata.error and not metadata.versions:
             enriched = dict(row)
+            enriched["DEPLOYED_VERSION"] = purl.version or ""
             for col in ENRICHED_COLUMNS:
-                enriched[col] = ERROR
+                if col != "DEPLOYED_VERSION":
+                    enriched[col] = ERROR
             enriched_rows.append(enriched)
         else:
-            enriched_rows.append(enrich_row(row, metadata, row.get("PURL", "")))
+            enriched_rows.append(enrich_row(row, metadata, row.get("PURL", ""), purl))
 
     if skipped_unsupported:
         logger.info("Skipped %d rows with unsupported ecosystems", skipped_unsupported)

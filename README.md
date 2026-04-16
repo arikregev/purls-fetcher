@@ -53,10 +53,12 @@ python3 main.py --input dependencies.csv --output enriched.csv
 CSV with these columns:
 
 ```
-CSI_ID,COMPONENT,BUILD_ID,PURL,DEPLOYED_VERSION
-CSI-001,WebApp,build-100,pkg:pypi/requests@2.28.0,2.28.0
-CSI-002,BackendSvc,build-201,pkg:maven/org.apache.commons/commons-lang3@3.12.0,3.12.0
+CSI_ID,PROJECT_NAME,BUILD_ID,PURL
+CSI-001,WebApp,build-100,pkg:pypi/requests@2.28.0
+CSI-002,BackendSvc,build-201,pkg:maven/org.apache.commons/commons-lang3@3.12.0
 ```
+
+The version is extracted automatically from the PURL — no separate version column needed.
 
 ## Output Format
 
@@ -64,6 +66,7 @@ The output CSV preserves all input columns and appends:
 
 | Column | Description |
 |--------|-------------|
+| `DEPLOYED_VERSION` | Version extracted from the PURL |
 | `PUBLISHED_AT` | Publish date of the deployed version |
 | `LATEST_VERSION` | Latest stable version in the registry |
 | `LATEST_VERSION_PUBLISHED_AT` | Publish date of the latest version |
