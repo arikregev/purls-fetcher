@@ -6,6 +6,7 @@ import asyncio
 import csv
 import json
 import logging
+import os
 import random
 import re
 import sys
@@ -784,6 +785,12 @@ def main() -> None:
         level=getattr(logging, args.log_level),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+
+    if _proxy is None:
+        env_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+        if env_proxy:
+            _proxy = env_proxy
+            logger.info("Proxy auto-detected from environment: %s", _proxy)
 
     rows = read_input_csv(args.input)
     logger.info("Read %d rows from %s", len(rows), args.input)
