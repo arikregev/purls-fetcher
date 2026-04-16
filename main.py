@@ -24,8 +24,12 @@ from packageurl import PackageURL
 
 NOT_FOUND = "NOT_FOUND"
 ERROR = "ERROR"
-MAX_RETRIES = 3
-BASE_BACKOFF = 1.0
+DEFAULT_MAX_RETRIES = 5
+DEFAULT_BASE_BACKOFF = 2.0
+
+# Set at runtime via CLI; used by _request_with_retry.
+_max_retries: int = DEFAULT_MAX_RETRIES
+_base_backoff: float = DEFAULT_BASE_BACKOFF
 
 INPUT_COLUMNS = ["CSI_ID", "PROJECT_NAME", "BUILD_ID", "PURL"]
 ENRICHED_COLUMNS = [
@@ -192,41 +196,47 @@ async def _request_with_retry(
 ) -> dict | str:
     last_exc: Exception | None = None
     last_status: int | None = None
-    for attempt in range(MAX_RETRIES + 1):
+    for attempt in range(_max_retries + 1):
         try:
             async with session.get(url, headers=headers, proxy=proxy) as resp:
                 if resp.status == 200:
                     return (await resp.json()) if parse_json else (await resp.text())
                 if resp.status in RETRYABLE_STATUSES:
                     last_status = resp.status
-                    if attempt < MAX_RETRIES:
+                    if attempt < _max_retries:
                         retry_after = resp.headers.get("Retry-After")
                         if retry_after:
                             delay = float(retry_after)
                         else:
-                            delay = BASE_BACKOFF * (2**attempt) + random.random()
-                        logger.debug(
-                            "HTTP %d from %s — retrying in %.1fs",
-                            resp.status, url, delay,
+                            delay = _base_backoff * (2**attempt) + random.random()
+                        logger.warning(
+                            "HTTP %d from %s — retry %d/%d in %.1fs",
+                            resp.status, url, attempt + 1, _max_retries, delay,
                         )
                         await asyncio.sleep(delay)
                         continue
                     # Last attempt — fall through to raise_for_status
+                    logger.error(
+                        "HTTP %d from %s — all %d retries exhausted",
+                        resp.status, url, _max_retries,
+                    )
                 resp.raise_for_status()
         except aiohttp.ClientResponseError:
             raise
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             last_exc = exc
-            if attempt < MAX_RETRIES:
-                delay = BASE_BACKOFF * (2**attempt) + random.random()
-                logger.debug(
-                    "Connection error for %s — retrying in %.1fs: %s",
-                    url,
-                    delay,
-                    exc,
+            if attempt < _max_retries:
+                delay = _base_backoff * (2**attempt) + random.random()
+                logger.warning(
+                    "Connection error for %s — retry %d/%d in %.1fs: %s",
+                    url, attempt + 1, _max_retries, delay, exc,
                 )
                 await asyncio.sleep(delay)
             else:
+                logger.error(
+                    "Connection error for %s — all %d retries exhausted: %s",
+                    url, _max_retries, exc,
+                )
                 raise
     # Should not be reached, but guard against it
     if last_exc is not None:
@@ -786,6 +796,18 @@ def main() -> None:
         help="HTTP/HTTPS proxy URL (e.g., http://proxy.corp:8080)",
     )
     parser.add_argument(
+        "--retries",
+        type=int,
+        default=DEFAULT_MAX_RETRIES,
+        help=f"Max retries on 429/5xx/connection errors (default: {DEFAULT_MAX_RETRIES})",
+    )
+    parser.add_argument(
+        "--backoff",
+        type=float,
+        default=DEFAULT_BASE_BACKOFF,
+        help=f"Base backoff in seconds, doubles each retry (default: {DEFAULT_BASE_BACKOFF})",
+    )
+    parser.add_argument(
         "--log-file",
         default=None,
         help="Path to log file (logs are always printed to console; this adds a file copy)",
@@ -798,8 +820,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    global _proxy
+    global _proxy, _max_retries, _base_backoff
     _proxy = args.proxy
+    _max_retries = args.retries
+    _base_backoff = args.backoff
 
     log_level = getattr(logging, args.log_level)
     log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
